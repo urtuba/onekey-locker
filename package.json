@@ -1,0 +1,7 @@
+{
+  "name": "onekey-locker",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "Samed Kahyaoglu <32146055+urtuba@users.noreply.github.com>",
+  "license": "GPL-3.0"
+}
