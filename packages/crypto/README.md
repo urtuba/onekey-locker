@@ -1,114 +1,106 @@
 # @onekey-locker/crypto
 
-Cryptographic primitives for OneKey Locker. Provides key generation and encoding for zero-knowledge encrypted storage.
+Cryptographic primitives for OneKey Locker. Handles key generation, encryption/decryption, and encoding for zero-knowledge blob storage.
+
+## Core Concepts
+
+**KeyPair:**
+- `privateKey` (32 bytes): Secret, proves ownership, derives publicKey
+- `publicKey` (32 bytes): Derived from privateKey via SHA-512, used as encryption key and blob identifier
+
+**Payload:** Encrypted content structure
+```typescript
+interface Payload {
+  v: 1                           // schema version
+  t: number                      // created timestamp (ms)
+  u: number                      // updated timestamp (ms)
+  type: 'text' | 'kv' | 'json'
+  data: { content: string } | { entries: Array<{k: string, v: string}> } | { content: unknown }
+}
+```
+
+**Blob:** Encrypted payload with wire format: `[version: 1 byte][nonce: 24 bytes][ciphertext]`
+
+**Encoding:** Base64url (URL-safe, no padding)
 
 ## API
 
+### Keys
 ```typescript
-interface KeyPair {
-  privateKey: Uint8Array  // 32 bytes
-  publicKey: Uint8Array   // 32 bytes
-}
-
 function generateKeyPair(seed?: Uint8Array): KeyPair
-function derivePublicKey(privateKey: Uint8Array): Uint8Array
+function deriveBlobId(publicKey: Uint8Array): string  // First 16 bytes, base64url
+function deriveKeyHash(publicKey: Uint8Array): string // SHA-256 hash, base64url
+function verifyKey(privateKey: Uint8Array, publicKey: Uint8Array): boolean
+```
+
+### Cipher
+```typescript
+function encrypt(payload: Payload, publicKey: Uint8Array): Uint8Array
+function decrypt(blob: Uint8Array, publicKey: Uint8Array): Payload
+function canDecrypt(blob: Uint8Array, publicKey: Uint8Array): boolean
+function getBlobSize(blob: Uint8Array): number
+```
+
+### Encoding
+```typescript
 function toBase64Url(bytes: Uint8Array): string
 function fromBase64Url(str: string): Uint8Array
 ```
 
-## Keys
-
-**Private Key:**
-- Randomly generated (or XORed with seed)
-- Must remain secret
-- Allows derivation of public key
-- Used for API authentication via `derivePublicKey(privKey) === storedPubKey`
-
-**Public Key:**
-- Deterministically derived: `hash(privateKey)[0:32]`
-- Safe to expose (acts as blob ID)
-- Used as encryption key
-- Derivation is fast (single SHA-512 hash, truncated)
-
-### Format
-
-| Key | Size | Encoded Length | Purpose |
-|-----|------|----------------|---------|
-| Private Key | 32 bytes (256 bits) | 43 chars | Full access (decrypt + update) |
-| Public Key | 32 bytes (256 bits) | 43 chars | Encryption key + blob identifier |
-
-**Encoding:** Base64url (URL-safe, no padding: `A-Za-z0-9_-`)
-
-
-### Private Key Security
-
-**Entropy:** 256 bits = 2^256 possible keys
-
-**Brute force resistance:**
-- At 1 billion guesses/second: ~3.67 × 10^64 years to exhaust keyspace
-- At current Bitcoin network hashrate (600 EH/s): ~10^54 years
-- **Conclusion:** Computationally infeasible to guess
-
-**Note on seed mixing:** 
-```typescript
-privateKey = random(32) XOR seed(32)  // seed adds entropy, doesn't make deterministic
-```
-Seed cannot recreate the same key because randomness dominates. XOR prevents seed alone from determining output.
-
-### Public Key Collision Risk
-
-```
-P(collision) ≈ 1 - e^(-n²/2^k)
-where k = 256 bits, n = number of keys
-```
-
-**Collision probabilities:**
-
-| Keys Generated | Collision Probability |
-|----------------|----------------------|
-| 2^128 (~10^38) | ~50% |
-| 2^64 (~10^19)  | ~0.0000001% |
-| 1 billion      | ~10^-60 |
-| 1 trillion     | ~10^-54 |
-
-**Real-world context:**
-- UUID (128 bits): 50% collision at ~2^64 UUIDs
-- SHA256 (256 bits): 50% collision at ~2^128 hashes
-- OneKey public keys: **128 bits stronger than UUIDs**
-
-**Practical risk:** If you generate 1 billion blobs, collision chance is ~10^-60 (effectively zero).
-
 ## Examples
 
-### Generate Keys
+### Create and Encrypt
 ```typescript
-import { generateKeyPair, toBase64Url } from '@onekey-locker/crypto'
+import { generateKeyPair, encrypt, toBase64Url } from '@onekey-locker/crypto'
 
 const { privateKey, publicKey } = generateKeyPair()
 
-console.log('Private:', toBase64Url(privateKey))
-// Private: X3k9mP_Qa8vL2nR4tY6uI0oP9aS8dF7gH1jK5lZ3xC4
+const payload = {
+  v: 1,
+  t: Date.now(),
+  u: Date.now(),
+  type: 'text',
+  data: { content: 'Secret message' }
+}
 
-console.log('Public:', toBase64Url(publicKey))  
-// Public: A7b2C9d8E4f1G6h3I0j5K2l9M8n7O4p1Q6r3S0t5U2v9
+const blob = encrypt(payload, publicKey)
+console.log('Encrypted size:', getBlobSize(blob), 'bytes')
 ```
 
-### Derive Public from Private
+### Decrypt and Verify
 ```typescript
-import { derivePublicKey, toBase64Url, fromBase64Url } from '@onekey-locker/crypto'
+import { decrypt, verifyKey, fromBase64Url } from '@onekey-locker/crypto'
 
-const privKeyStr = 'X3k9mP_Qa8vL2nR4tY6uI0oP9aS8dF7gH1jK5lZ3xC4'
-const privateKey = fromBase64Url(privKeyStr)
+const privateKey = fromBase64Url('X3k9mP_Qa8vL2nR4tY6uI0oP...')
+const publicKey = fromBase64Url('A7b2C9d8E4f1G6h3I0j5K2l9...')
 
-const publicKey = derivePublicKey(privateKey)
-console.log(toBase64Url(publicKey))
-// A7b2C9d8E4f1G6h3I0j5K2l9M8n7O4p1Q6r3S0t5U2v9
+// Verify ownership
+if (!verifyKey(privateKey, publicKey)) {
+  throw new Error('Invalid private key')
+}
+
+// Decrypt
+const payload = decrypt(blob, publicKey)
+console.log(payload.data)
 ```
 
-### With Optional Seed
+### Blob Identifiers
 ```typescript
-const seed = new Uint8Array(32).fill(42) // User-provided entropy
-const { privateKey, publicKey } = generateKeyPair(seed)
+import { deriveBlobId, deriveKeyHash } from '@onekey-locker/crypto'
 
-// Note: Same seed will NOT produce same keys (random bytes mixed in)
+const blobId = deriveBlobId(publicKey)      // Short ID for storage
+const keyHash = deriveKeyHash(publicKey)    // Full hash for verification
 ```
+
+## Security
+
+- **Encryption:** X25519 + XSalsa20-Poly1305 (tweetnacl)
+- **Key derivation:** SHA-512 for publicKey, SHA-256 for hashes
+- **Key strength:** 256 bits (2^256 keyspace)
+- **Collision risk:** Negligible at scale (128 bits stronger than UUIDs)
+
+## Notes
+
+- Optional `seed` parameter adds entropy via XOR, does not make keys deterministic
+- Public key doubles as encryption key and blob identifier
+- Private key proves ownership by deriving matching public key
