@@ -11,7 +11,7 @@ export interface KeyPair {
  * @param seed - Optional seed for additional entropy (does not allow key recreation)
  * @returns KeyPair with 32-byte keys
  */
-export const generateKeyPair = async (seed?: Uint8Array): Promise<KeyPair> => {
+export const generateKeyPair = (seed?: Uint8Array): KeyPair => {
   const randomBytes = nacl.randomBytes(32)
 
   const privateKey = seed && seed.length === 32 ? xorBytes(randomBytes, seed) : randomBytes

@@ -1,3 +1,5 @@
-export { toBase64Url, fromBase64Url } from './encoding.js'
-export { generateKeyPair, derivePublicKey } from './keys.js'
-export type { KeyPair } from './keys.js'
+export { fromBase64Url, toBase64Url } from './encoding'
+export type { KeyPair } from './keys'
+export { derivePublicKey, generateKeyPair } from './keys'
+
+
