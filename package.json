@@ -10,10 +10,11 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "build": "npm run build -w @onekey-locker/crypto",
-    "typecheck": "npm run typecheck -w @onekey-locker/crypto",
+    "build": "npm run build -w @onekey-locker/crypto && npm run build -w @onekey-locker/api",
+    "typecheck": "npm run build -w @onekey-locker/crypto && npm run typecheck -w @onekey-locker/api && npm run typecheck -w @onekey-locker/crypto",
     "test": "npm run test --workspaces --if-present",
-    "test:crypto": "npm run test -w @onekey-locker/crypto"
+    "test:crypto": "npm run test -w @onekey-locker/crypto",
+    "test:api": "npm run test -w @onekey-locker/api"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

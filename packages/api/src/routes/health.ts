@@ -1,39 +1,18 @@
-import { type Request, type Response, Router } from 'express'
-import { prisma } from '../db/client.js'
+import { Hono } from 'hono'
+import type { Sql } from '../db.js'
 
-const router = Router()
+export const healthRoutes = (sql: Sql) => {
+  const app = new Hono()
 
-router.get('/', async (_req: Request, res: Response) => {
-  try {
-    // Check database connection
-    await prisma.$queryRaw`SELECT 1`
+  app.get('/', async (c) => {
+    try {
+      await sql`SELECT 1`
+      return c.json({ status: 'ok' })
+    } catch (error) {
+      console.error('Health check failed:', error)
+      return c.json({ status: 'error' }, 503)
+    }
+  })
 
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      database: 'connected',
-    })
-  } catch (error) {
-    res.status(503).json({
-      status: 'unhealthy',
-      timestamp: new Date().toISOString(),
-      database: 'disconnected',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    })
-  }
-})
-
-router.get('/ready', async (_req: Request, res: Response) => {
-  try {
-    await prisma.$queryRaw`SELECT 1`
-    res.json({ ready: true })
-  } catch {
-    res.status(503).json({ ready: false })
-  }
-})
-
-router.get('/live', (_req: Request, res: Response) => {
-  res.json({ live: true })
-})
-
-export default router
+  return app
+}
