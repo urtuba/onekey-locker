@@ -1,6 +1,6 @@
 import type { Payload } from './cipher'
-import { canDecrypt, decrypt, encrypt, getBlobSize } from './cipher'
-import { generateKeyPair } from './keys'
+import { canDecrypt, decrypt, encrypt, getBlobSize, MAX_BLOB_BYTES, MIN_BLOB_BYTES } from './cipher'
+import { deriveReadKey, generateSecret } from './keys'
 
 describe('encrypt/decrypt', () => {
   const correctKey = new Uint8Array(32).fill(1)
@@ -64,7 +64,7 @@ describe('encrypt/decrypt', () => {
     ]
 
     for (const p of payloads) {
-        const blob = encrypt(p, correctKey)
+      const blob = encrypt(p, correctKey)
       expect(decrypt(blob, correctKey)).toEqual(p)
     }
   })
@@ -110,5 +110,43 @@ describe('canDecrypt', () => {
   it('returns false for corrupted blob', () => {
     const blob = new Uint8Array(100)
     expect(canDecrypt(blob, correctKey)).toBe(false)
+  })
+})
+
+describe('blob limits and payload checks', () => {
+  const key = deriveReadKey(generateSecret())
+
+  it('MIN_BLOB_BYTES is version + nonce + MAC', () => {
+    expect(MIN_BLOB_BYTES).toBe(41)
+    expect(MAX_BLOB_BYTES).toBe(16384)
+  })
+
+  it('every real blob is at least the minimum size', () => {
+    const blob = encrypt({ v: 1, t: 1, u: 1, type: 'text', data: { content: '' } }, key)
+    expect(blob.length).toBeGreaterThanOrEqual(MIN_BLOB_BYTES)
+  })
+
+  it('refuses to encrypt a blob larger than the limit', () => {
+    const big: Payload = { v: 1, t: 1, u: 1, type: 'text', data: { content: 'x'.repeat(MAX_BLOB_BYTES) } }
+    expect(() => encrypt(big, key)).toThrow('Blob too large')
+  })
+
+  it('accepts a blob at the limit', () => {
+    const overhead = encrypt({ v: 1, t: 1, u: 1, type: 'text', data: { content: '' } }, key).length
+    const fits: Payload = {
+      v: 1,
+      t: 1,
+      u: 1,
+      type: 'text',
+      data: { content: 'x'.repeat(MAX_BLOB_BYTES - overhead) },
+    }
+    expect(encrypt(fits, key)).toHaveLength(MAX_BLOB_BYTES)
+  })
+
+  it('rejects a decrypted value that is not a payload', () => {
+    const bad = { v: 2, t: 1, u: 1, type: 'text', data: { content: 'x' } } as unknown as Payload
+    expect(() => decrypt(encrypt(bad, key), key)).toThrow('Invalid payload')
+    const bad2 = { v: 1, t: 1, u: 1, type: 'kv', data: { entries: [{ k: 1, v: 'a' }] } } as unknown as Payload
+    expect(() => decrypt(encrypt(bad2, key), key)).toThrow('Invalid payload')
   })
 })

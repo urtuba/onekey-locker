@@ -1,8 +1,8 @@
-import { z } from 'zod';
-import dotenv from 'dotenv';
+import dotenv from 'dotenv'
+import { z } from 'zod'
 
 // Load .env file
-dotenv.config();
+dotenv.config()
 
 const envSchema = z.object({
   // Server
@@ -22,23 +22,23 @@ const envSchema = z.object({
 
   // Logging
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-});
+})
 
-export type Env = z.infer<typeof envSchema>;
+export type Env = z.infer<typeof envSchema>
 
 function validateEnv(): Env {
-  const parsed = envSchema.safeParse(process.env);
+  const parsed = envSchema.safeParse(process.env)
 
   if (!parsed.success) {
-    console.error('Invalid environment variables:');
-    console.error(parsed.error.flatten().fieldErrors);
-    process.exit(1);
+    console.error('Invalid environment variables:')
+    console.error(parsed.error.flatten().fieldErrors)
+    process.exit(1)
   }
 
-  return parsed.data;
+  return parsed.data
 }
 
-export const env = validateEnv();
+export const env = validateEnv()
 
 export const config = {
   server: {
@@ -61,4 +61,4 @@ export const config = {
   logging: {
     level: env.LOG_LEVEL,
   },
-} as const;
+} as const

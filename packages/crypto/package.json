@@ -6,13 +6,21 @@
   "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
     "test": "node --experimental-vm-modules ../../node_modules/jest/bin/jest.js --config ../../jest.config.js --verbose"
   },
   "dependencies": {
-    "tweetnacl": "^1.0.3"
+    "tweetnacl": "1.0.3"
   },
-  "devDependencies": {
-    "@types/node": "^25.0.8",
-    "typescript": "^5.9.3"
-  }
+  "description": "Key derivation, encryption and signed updates for OneKey Locker.",
+  "license": "AGPL-3.0-only",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ]
 }
