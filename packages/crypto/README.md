@@ -5,8 +5,8 @@ Cryptographic primitives for OneKey Locker. Handles key generation, encryption/d
 ## Core Concepts
 
 **KeyPair:**
-- `privateKey` (32 bytes): Secret, proves ownership, derives publicKey
-- `publicKey` (32 bytes): Derived from privateKey via SHA-512, used as encryption key and blob identifier
+- `privateKey` (32 bytes): the owner's secret. The other keys are derived from it.
+- `publicKey` (32 bytes): the first 32 bytes of SHA-512(privateKey). Despite the name, it is **not** a public key: it is the secret symmetric key that encrypts the content, so anyone who has it can read the blob. Think of it as the read key.
 
 **Payload:** Encrypted content structure
 ```typescript
@@ -28,9 +28,9 @@ interface Payload {
 ### Keys
 ```typescript
 function generateKeyPair(seed?: Uint8Array): KeyPair
-function deriveBlobId(publicKey: Uint8Array): string  // First 16 bytes, base64url
-function deriveKeyHash(publicKey: Uint8Array): string // SHA-256 hash, base64url
-function verifyKey(privateKey: Uint8Array, publicKey: Uint8Array): boolean
+function deriveBlobId(publicKey: Uint8Array): Uint8Array   // first 16 bytes of SHA-512(publicKey)
+function deriveKeyHash(key: Uint8Array): Uint8Array        // first 32 bytes of SHA-512(key)
+function verifyKey(key: Uint8Array, storedHash: Uint8Array): boolean // deriveKeyHash(key) equals storedHash
 ```
 
 ### Cipher
@@ -51,7 +51,7 @@ function fromBase64Url(str: string): Uint8Array
 
 ### Create and Encrypt
 ```typescript
-import { generateKeyPair, encrypt, toBase64Url } from '@onekey-locker/crypto'
+import { generateKeyPair, encrypt, getBlobSize } from '@onekey-locker/crypto'
 
 const { privateKey, publicKey } = generateKeyPair()
 
@@ -71,12 +71,12 @@ console.log('Encrypted size:', getBlobSize(blob), 'bytes')
 ```typescript
 import { decrypt, verifyKey, fromBase64Url } from '@onekey-locker/crypto'
 
-const privateKey = fromBase64Url('X3k9mP_Qa8vL2nR4tY6uI0oP...')
-const publicKey = fromBase64Url('A7b2C9d8E4f1G6h3I0j5K2l9...')
+const publicKey = fromBase64Url('A7b2C9d8E4f1G6h3I0j5K2l9...') // the read key
+const storedHash = deriveKeyHash(publicKey)                     // what a server would keep
 
-// Verify ownership
-if (!verifyKey(privateKey, publicKey)) {
-  throw new Error('Invalid private key')
+// Check a key against the stored hash
+if (!verifyKey(publicKey, storedHash)) {
+  throw new Error('Wrong key')
 }
 
 // Decrypt
@@ -88,19 +88,19 @@ console.log(payload.data)
 ```typescript
 import { deriveBlobId, deriveKeyHash } from '@onekey-locker/crypto'
 
-const blobId = deriveBlobId(publicKey)      // Short ID for storage
-const keyHash = deriveKeyHash(publicKey)    // Full hash for verification
+const blobId = toBase64Url(deriveBlobId(publicKey))   // short ID for URLs and storage
+const keyHash = deriveKeyHash(publicKey)               // full hash for verification
 ```
 
 ## Security
 
-- **Encryption:** X25519 + XSalsa20-Poly1305 (tweetnacl)
-- **Key derivation:** SHA-512 for publicKey, SHA-256 for hashes
+- **Encryption:** XSalsa20-Poly1305 (`nacl.secretbox` from tweetnacl), a symmetric cipher. There is no X25519 key exchange.
+- **Key derivation:** SHA-512 (truncated) for the read key, the blob ID and key hashes
 - **Key strength:** 256 bits (2^256 keyspace)
 - **Collision risk:** Negligible at scale (128 bits stronger than UUIDs)
 
 ## Notes
 
 - Optional `seed` parameter adds entropy via XOR, does not make keys deterministic
-- Public key doubles as encryption key and blob identifier
-- Private key proves ownership by deriving matching public key
+- The blob ID is a hash of the read key, so it does not reveal the key
+- Because the read key is a hash of the private key, anyone who sees the private key can read the blob. A server must never receive it; see "Design review" in the [root README](../../README.md#design-review)
