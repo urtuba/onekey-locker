@@ -26,6 +26,3 @@ npm-debug.log*
 # Docker
 docker-compose.override.yml
 
-# Blob storage
-blobs/
-

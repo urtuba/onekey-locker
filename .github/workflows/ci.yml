@@ -4,9 +4,28 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  crypto:
+  ci:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: onekey_locker_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/onekey_locker_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -14,5 +33,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run test:crypto
-      - run: npm run build -w @onekey-locker/crypto
+      - name: Lint and format (Biome)
+        run: npm run lint
+      - name: Typecheck (builds the crypto package first)
+        run: npm run typecheck
+      - name: Crypto tests (jest)
+        run: npm run test:crypto
+      - name: API tests (vitest, against the Postgres service)
+        run: npm run test:api
+      - name: Client tests (vitest)
+        run: npm run test:client
+      - name: Build all packages
+        run: npm run build
