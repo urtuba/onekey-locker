@@ -1,88 +1,87 @@
 import nacl from 'tweetnacl'
-
-export interface KeyPair {
-  privateKey: Uint8Array // 32 bytes
-  publicKey: Uint8Array // 32 bytes
-}
+import { toBase64Url } from './encoding.js'
 
 /**
- * Generate a cryptographic key pair
- * @param seed - Optional seed for additional entropy (does not allow key recreation)
- * @returns KeyPair with 32-byte keys
+ * Key scheme (v1). Everything is derived from one random 32-byte `secret`:
+ *
+ *   readKey      = SHA-512("onekey-locker/read/v1"  || secret)[0:32]   encrypts the content
+ *   blobId       = base64url(SHA-512("onekey-locker/id/v1" || readKey)[0:16])
+ *   writeKeyPair = Ed25519 keypair from seed SHA-512("onekey-locker/write/v1" || secret)[0:32]
+ *
+ * The view link carries `readKey`. The edit link carries `secret`. The server gets the
+ * blobId and the Ed25519 public key only, so it cannot derive `readKey` or `secret`.
  */
-export const generateKeyPair = (seed?: Uint8Array): KeyPair => {
-  const randomBytes = nacl.randomBytes(32)
-  const privateKey = seed && seed.length === 32 ? xorBytes(randomBytes, seed) : randomBytes
-  const publicKey = nacl.hash(privateKey).slice(0, 32)
 
-  return { privateKey, publicKey }
+export const SECRET_BYTES = 32
+export const READ_KEY_BYTES = 32
+export const BLOB_ID_BYTES = 16
+export const BLOB_ID_LENGTH = 22 // base64url of 16 bytes
+
+export const READ_DOMAIN = 'onekey-locker/read/v1'
+export const ID_DOMAIN = 'onekey-locker/id/v1'
+export const WRITE_DOMAIN = 'onekey-locker/write/v1'
+
+export interface WriteKeyPair {
+  /** Ed25519 public key (32 bytes). The only key material the server stores. */
+  publicKey: Uint8Array
+  /** Ed25519 secret key (64 bytes, tweetnacl format). Never leaves the client. */
+  secretKey: Uint8Array
 }
 
-/**
- * Derive public key from private key
- * @param privateKey - 32-byte private key
- * @returns 32-byte public key
- */
-export const derivePublicKey = (privateKey: Uint8Array): Uint8Array => {
-  if (privateKey.length !== 32) {
-    throw new Error('Private key must be 32 bytes')
+export interface DerivedKeys {
+  readKey: Uint8Array
+  blobId: string
+  writeKeyPair: WriteKeyPair
+}
+
+const encoder = new TextEncoder()
+
+/** SHA-512(domain || data), first `length` bytes. */
+const domainHash = (domain: string, data: Uint8Array, length: number): Uint8Array => {
+  const prefix = encoder.encode(domain)
+  const input = new Uint8Array(prefix.length + data.length)
+  input.set(prefix, 0)
+  input.set(data, prefix.length)
+  return nacl.hash(input).slice(0, length)
+}
+
+const assertLength = (bytes: Uint8Array, length: number, name: string): void => {
+  if (!(bytes instanceof Uint8Array) || bytes.length !== length) {
+    throw new Error(`${name} must be ${length} bytes`)
   }
-
-  return nacl.hash(privateKey).slice(0, 32)
 }
 
-/**
- * Derive blob ID from public key (16 bytes for URL identifier)
- * @param publicKey - 32-byte public key
- * @returns 16-byte blob ID
- */
-export const deriveBlobId = (publicKey: Uint8Array): Uint8Array => {
-  if (publicKey.length !== 32) {
-    throw new Error('Public key must be 32 bytes')
-  }
+/** A fresh random 32-byte secret. This is what the edit link carries. */
+export const generateSecret = (): Uint8Array => nacl.randomBytes(SECRET_BYTES)
 
-  return nacl.hash(publicKey).slice(0, 16)
+/** The key that encrypts and decrypts the content. This is what the view link carries. */
+export const deriveReadKey = (secret: Uint8Array): Uint8Array => {
+  assertLength(secret, SECRET_BYTES, 'Secret')
+  return domainHash(READ_DOMAIN, secret, READ_KEY_BYTES)
 }
 
-/**
- * Derive full public key hash for storage/validation (32 bytes)
- * @param key - 32-byte public or private key
- * @returns 32-byte key hash
- */
-export const deriveKeyHash = (key: Uint8Array): Uint8Array => {
-  if (key.length !== 32) {
-    throw new Error('Key must be 32 bytes')
-  }
-
-  return nacl.hash(key).slice(0, 32)
+/** The blob id, derived from the read key alone, so a viewer can find the blob. */
+export const deriveBlobId = (readKey: Uint8Array): string => {
+  assertLength(readKey, READ_KEY_BYTES, 'Read key')
+  return toBase64Url(domainHash(ID_DOMAIN, readKey, BLOB_ID_BYTES))
 }
 
-/**
- * Verify that a public key matches the stored hash
- * @param key - 32-byte public or private key
- * @param storedHash - 32-byte stored hash
- * @returns true if key matches stored hash, false otherwise
- */
-export const verifyKey = (key: Uint8Array, storedHash: Uint8Array): boolean => {
-  const derived = deriveKeyHash(key)
-  if (derived.length !== storedHash.length) return false
-  for (let i = 0; i < derived.length; i++) {
-    if (derived[i] !== storedHash[i]) return false
-  }
-
-  return true
+/** The Ed25519 key pair that signs updates. Only the public key goes to the server. */
+export const deriveWriteKeyPair = (secret: Uint8Array): WriteKeyPair => {
+  assertLength(secret, SECRET_BYTES, 'Secret')
+  const seed = domainHash(WRITE_DOMAIN, secret, 32)
+  const { publicKey, secretKey } = nacl.sign.keyPair.fromSeed(seed)
+  return { publicKey, secretKey }
 }
 
-/**
- * XOR two byte arrays
- * @param a - first byte array
- * @param b - second byte array
- * @returns XORed byte array
- */
-const xorBytes = (a: Uint8Array, b: Uint8Array): Uint8Array => {
-  const result = new Uint8Array(32)
-  for (let i = 0; i < 32; i++) {
-    result[i] = a[i] ^ b[i]
-  }
-  return result
+/** All keys for an owner, derived from the secret. */
+export const deriveKeys = (secret: Uint8Array): DerivedKeys => {
+  const readKey = deriveReadKey(secret)
+  return { readKey, blobId: deriveBlobId(readKey), writeKeyPair: deriveWriteKeyPair(secret) }
 }
+
+/** The keys a viewer can get from the view link: the read key and the blob id. */
+export const deriveViewKeys = (readKey: Uint8Array): { readKey: Uint8Array; blobId: string } => ({
+  readKey,
+  blobId: deriveBlobId(readKey),
+})

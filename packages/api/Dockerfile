@@ -1,44 +1,26 @@
-# Build stage
-FROM node:20-alpine AS builder
+# Build context: the repository root (see docker-compose.yml).
 
+FROM node:22-alpine AS build
 WORKDIR /app
+COPY package.json package-lock.json .npmrc ./
+COPY packages/crypto/package.json packages/crypto/
+COPY packages/api/package.json packages/api/
+COPY packages/client/package.json packages/client/
+RUN npm ci
+COPY packages/crypto packages/crypto
+COPY packages/api packages/api
+RUN npm run build -w @onekey-locker/crypto && npm run build -w @onekey-locker/api
 
-# Install dependencies
-COPY package.json ./
-RUN npm install
-
-# Copy Prisma schema and generate client
-COPY prisma ./prisma
-RUN npx prisma generate
-
-# Copy source files
-COPY tsconfig.json tsup.config.ts ./
-COPY src ./src
-
-# Build
-RUN npm run build
-
-# Production stage
-FROM node:20-alpine
-
+FROM node:22-alpine
 WORKDIR /app
-
-# Copy package.json and install production dependencies
-COPY package.json ./
-RUN npm install --omit=dev
-
-# Copy Prisma schema and generate client
-COPY prisma ./prisma
-RUN npx prisma generate
-
-# Copy built files
-COPY --from=builder /app/dist ./dist
-
-# Set environment
 ENV NODE_ENV=production
-ENV PORT=3001
-ENV HOST=0.0.0.0
-
+COPY package.json package-lock.json .npmrc ./
+COPY packages/crypto/package.json packages/crypto/
+COPY packages/api/package.json packages/api/
+COPY packages/client/package.json packages/client/
+RUN npm ci --omit=dev -w @onekey-locker/api
+COPY --from=build /app/packages/crypto/dist packages/crypto/dist
+COPY --from=build /app/packages/api/dist packages/api/dist
+USER node
 EXPOSE 3001
-
-CMD ["node", "dist/index.js"]
+CMD ["node", "packages/api/dist/index.js"]

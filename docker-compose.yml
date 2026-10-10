@@ -1,0 +1,63 @@
+# OneKey Locker, running locally: Postgres, the API and the web client.
+#
+#   docker compose up --build
+#   open http://127.0.0.1:8080
+#
+# Every published port is bound to 127.0.0.1. This setup has no accounts and no rate limits:
+# do not put it on the internet as it is (see the README).
+
+name: onekey-locker
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: onekey
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-onekey}
+      POSTGRES_DB: onekey_locker
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      # Only for running the API tests against this database. Not needed to use the app.
+      - "127.0.0.1:${POSTGRES_PORT:-54320}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onekey -d onekey_locker"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: packages/api/Dockerfile
+    environment:
+      # Inside the container the API must listen on all interfaces; the published port below is loopback only.
+      HOST: 0.0.0.0
+      PORT: "3001"
+      DATABASE_URL: postgresql://onekey:${POSTGRES_PASSWORD:-onekey}@postgres:5432/onekey_locker
+    ports:
+      - "127.0.0.1:${API_PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3001/api/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  client:
+    build:
+      context: .
+      dockerfile: packages/client/Dockerfile
+    ports:
+      - "127.0.0.1:${CLIENT_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pg_data:
